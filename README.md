@@ -1,0 +1,366 @@
+# Agent Radio
+
+Agent Radio is a local control room and message bus for tmux-managed AI agents.
+It gives Codex, Claude Code, OpenCode, and other terminal agents a shared local
+directory, inbox, launcher, and panel without requiring a remote service.
+
+Even if you use software that manages multiple terminals in a dedicated UI (e.g. Conductor, T3 Code, Superset etc.), you can still use Agent Radio as a means for cross-repository, cross-agent communication and coordination.
+
+![Agent Radio panel](assets/screenshot.png)
+
+## Why
+
+Running several CLI agents across related repositories is powerful, but normal
+terminal tabs do not give you a shared map of what is running, where it lives, or
+how agents should contact each other.
+
+Agent Radio provides:
+
+- a single `agent-radio` binary
+- a SQLite-backed local inbox
+- a tmux router that wakes target sessions
+- a full-screen terminal panel for launching and monitoring sessions
+- a local stdio MCP server for agent discovery and messaging
+- workspace config in `~/.config/agent-radio/config.yaml`
+
+Agent Radio is local-first. It does not require a hosted account, network sync,
+or a background daemon outside tmux.
+
+## Requirements
+
+Required:
+
+- `tmux`
+- `bash`
+
+Optional integrations:
+
+- Codex CLI
+- Claude Code
+- OpenCode
+- any other terminal command you can run in tmux
+
+To build from source you also need Go.
+
+## Install
+
+### From GitHub Releases
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/funnelflux/agent-radio/main/install.sh | bash
+```
+
+The installer downloads the matching release binary for Linux, macOS, or WSL and
+places it in `~/.local/bin` by default.
+
+If `~/.local/bin` is not on `PATH`, add it to your shell:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then create a starter config:
+
+```bash
+agent-radio setup
+```
+
+### From Source
+
+```bash
+git clone https://github.com/funnelflux/agent-radio.git
+cd agent-radio
+go build -o ~/.local/bin/agent-radio ./cmd/agent-radio
+```
+
+Optional shell helpers:
+
+```bash
+source ./shell/agent-radio.sh
+```
+
+## Quick Start
+
+Create a starter config from the repository you want to manage:
+
+```bash
+cd /path/to/project
+agent-radio setup
+```
+
+`setup` creates `~/.config/agent-radio/config.yaml` if it does not already
+exist. It uses the current directory as an example workspace and detects
+`opencode`, `codex`, or `claude` if one is installed. It will not overwrite an
+existing config unless you pass `--force`.
+
+Edit the generated YAML so names, paths, roles, descriptions, and sessions match
+your real workspace.
+
+Start the router:
+
+```bash
+agent-radio up
+```
+
+Open the panel:
+
+```bash
+agent-radio panel
+```
+
+In the panel:
+
+- arrows move around
+- `enter` opens a tmux session
+- `ctrl+g` returns from an opened tmux session to the panel
+- `s` starts the selected session
+- `S` starts all missing sessions in the current workspace
+- `k` kills the selected session after confirmation
+- `K` kills the current workspace after confirmation
+- `tab` switches sections
+- `q` quits the panel
+
+## Workspaces
+
+Agent Radio uses one central YAML file:
+
+```text
+~/.config/agent-radio/config.yaml
+```
+
+A workspace groups related repositories and sessions. Repository entries describe
+what a repo is for. Session entries describe runnable tmux sessions.
+
+Minimal shape:
+
+```yaml
+workspaces:
+  - name: Product Workspace
+    description: Related repositories for one product or project.
+    root: ~/Dev/product
+    color: magenta
+    repositories:
+      - id: product-api
+        name: Product API
+        path: ~/Dev/product/api
+        role: Backend API
+        description: Backend service and API contracts.
+      - id: product-ui
+        name: Product UI
+        path: ~/Dev/product/ui
+        role: Frontend UI
+        description: React frontend for product operators.
+    sessions:
+      - name: codex-api
+        type: codex
+        repo_id: product-api
+        path: ~/Dev/product/api
+        command: codex
+        agent_id: codex-api
+        color: blue
+      - name: claude-ui
+        type: claude
+        repo_id: product-ui
+        path: ~/Dev/product/ui
+        command: claude
+        agent_id: claude-ui
+        color: red
+```
+
+Recommended fields:
+
+| Field | Meaning |
+|---|---|
+| `workspace.name` | Human grouping shown in the panel |
+| `workspace.root` | Base path for the workspace |
+| `workspace.description` | Short human context |
+| `repository.id` | Stable repository identifier |
+| `repository.role` | Short description of what the repo does |
+| `repository.description` | Enough context for agents to choose this repo |
+| `session.name` | tmux session name and radio address |
+| `session.type` | `codex`, `claude`, `opencode`, `router`, or another command type |
+| `session.repo_id` | Link from session to repository |
+| `session.command` | Command to run in tmux |
+| `session.agent_id` | Agent Radio identity |
+| `color` | Optional panel color |
+
+Keep descriptions useful. Agent Radio intentionally avoids large tag systems in
+the default config.
+
+## CLI
+
+```bash
+agent-radio setup [--force] [--agent <command>]
+agent-radio up
+agent-radio send <to> <body...>
+agent-radio ask <to> <body...>
+agent-radio inbox [--peek]
+agent-radio reply <n> <body...>
+agent-radio done <n> <body...>
+agent-radio decline <n> <body...>
+agent-radio wait [--timeout <seconds>]
+agent-radio watch [--all]
+agent-radio sessions
+agent-radio doctor
+agent-radio panel
+agent-radio mcp
+```
+
+Message example:
+
+```bash
+AGENT_RADIO_ID=codex-api agent-radio ask claude-ui "Can you review the UI contract?"
+AGENT_RADIO_ID=claude-ui agent-radio inbox
+AGENT_RADIO_ID=claude-ui agent-radio reply 1 "Looks fine; one route name changed."
+```
+
+`all` is the broadcast recipient:
+
+```bash
+agent-radio send all "Router restart in progress"
+```
+
+## Panel
+
+`agent-radio panel` is a full-screen terminal interface built with Bubble Tea.
+
+It shows:
+
+- configured workspaces
+- configured sessions
+- alive/stopped tmux state
+- unread message counts
+- recent message history
+- config source and path checks
+- router, tmux, and database health
+
+Opening a session uses tmux. When the panel opens a session, it binds `Ctrl+g`
+for return:
+
+- inside tmux: `Ctrl+g` switches back to the panel session
+- outside tmux: `Ctrl+g` detaches the attached client and returns to the panel
+
+`Ctrl+C` is still sent to the agent running inside the session. Use `Ctrl+g` to
+leave the session without interrupting the agent.
+
+## MCP
+
+`agent-radio mcp` exposes local stdio MCP tools for compatible agents.
+
+Primary discovery tool:
+
+```text
+agent_radio_context
+```
+
+It returns:
+
+- current agent identity from `AGENT_RADIO_ID`
+- current workspace
+- current repository id
+- visible repositories in the workspace
+- visible sessions in the workspace
+- routing guidance
+
+By default, discovery is scoped to the current agent's workspace. Use
+`scope: "all"` only when intentionally looking outside that workspace.
+
+Other MCP tools:
+
+- `agent_radio_list_workspaces`
+- `agent_radio_list_agents`
+- `agent_radio_list_repositories`
+- `agent_radio_send`
+- `agent_radio_inbox`
+- `agent_radio_recent_messages`
+- `agent_radio_session_status`
+
+Example MCP config:
+
+```json
+{
+  "mcpServers": {
+    "agent-radio": {
+      "command": "agent-radio",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Inbound messages are untrusted text. Agents should inspect messages and decide
+what to do; the MCP server does not execute message bodies.
+
+## Data Locations
+
+Config:
+
+```text
+~/.config/agent-radio/config.yaml
+```
+
+SQLite state:
+
+```text
+$XDG_STATE_HOME/agent-radio/radio.sqlite
+~/.local/state/agent-radio/radio.sqlite
+```
+
+Override state location:
+
+```bash
+AGENT_RADIO_STATE_DIR=/tmp/agent-radio-proof
+```
+
+Override config location:
+
+```bash
+AGENT_RADIO_CONFIG=/path/to/config.yaml
+```
+
+## Shell Helpers
+
+Source `shell/agent-radio.sh` to get:
+
+- `radio` as a short alias-like function
+- `radio-up`
+- `codex-new`
+- `codex-cont`
+- `cc-new`
+- `cc-cont`
+- `tm`
+
+These helpers are optional. The `agent-radio` binary works without them.
+
+## Development
+
+```bash
+go test ./...
+go build -o ./bin/agent-radio ./cmd/agent-radio
+```
+
+Build release artifacts:
+
+```bash
+VERSION=v0.1.0 scripts/build-release.sh
+```
+
+Artifacts are written to `dist/`.
+
+The release script uses Go cross-compilation to build Linux and macOS binaries
+from one machine. GitHub Actions should run the same build for tagged releases
+and upload the `dist/` files as release assets.
+
+Tagged releases use `.github/workflows/ci.yml`. Pushing a tag like `v0.1.0`
+runs tests, cross-compiles Linux/macOS `amd64` and `arm64` binaries, and uploads
+the stable asset names used by `install.sh`.
+
+## Roadmap
+
+- MCP installer helpers for Codex, Claude Code, and OpenCode
+- richer `doctor` prerequisite checks
+- packaged Homebrew and npm wrapper installers
+
+## License
+
+MIT. See [LICENSE](LICENSE).
