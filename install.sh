@@ -67,8 +67,9 @@ Next steps:
   agent-radio up
   agent-radio panel
 
-Setup creates ~/.config/agent-radio/config.yaml and installs the Agent Radio
-MCP server into detected Codex, Claude Code, and OpenCode configs.
+Setup opens a wizard that can create ~/.config/agent-radio/config.yaml and
+install the Agent Radio MCP server into selected Codex, Claude Code, and
+OpenCode configs.
 
 Edit the YAML after setup to match your real workspaces, repositories, and
 sessions.

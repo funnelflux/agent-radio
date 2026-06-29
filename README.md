@@ -59,15 +59,17 @@ If `~/.local/bin` is not on `PATH`, add it to your shell:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Then create a starter config:
+Then run the setup wizard:
 
 ```bash
 agent-radio setup
 ```
 
-`setup` creates your starter YAML and installs the Agent Radio MCP server into
-detected Codex, Claude Code, and OpenCode config directories. It backs up any
-client config file before changing it.
+`setup` lets you choose MCP targets, scans the current directory for repository
+folders, asks which CLI command new sessions should run, and updates
+`~/.config/agent-radio/config.yaml`. MCP registrations use the absolute
+installed binary path and repair stale Agent Radio entries. Existing client
+config files are backed up before changing.
 
 ### From Source
 
@@ -87,19 +89,23 @@ source ./shell/agent-radio.sh
 
 ## Quick Start
 
-Create a starter config from the repository you want to manage:
+Create or extend config from the folder you want to manage:
 
 ```bash
 cd /path/to/project
 agent-radio setup
 ```
 
-`setup` creates `~/.config/agent-radio/config.yaml` if it does not already
-exist. It uses the current directory as an example workspace and detects
-`opencode`, `codex`, or `claude` for the starter session command. It also
-installs Agent Radio as an MCP server for detected Codex, Claude Code, and
-OpenCode clients. It will not overwrite an existing Agent Radio config unless
-you pass `--force`.
+In a terminal, `setup` opens an interactive wizard:
+
+- select Codex, Claude Code, and/or OpenCode MCP registration
+- select folders to create repository/session entries for
+- choose the CLI command for those sessions
+- name the workspace
+- confirm and write the YAML
+
+For scripts, use flags such as `--agent`, `--no-mcp`, or `--force`; that keeps
+the non-interactive setup path.
 
 Edit the generated YAML so names, paths, roles, descriptions, and sessions match
 your real workspace.

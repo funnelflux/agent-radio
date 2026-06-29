@@ -15,10 +15,12 @@ cd /path/to/project
 agent-radio setup
 ```
 
-`setup` writes a small example based on the current directory when no config
-exists. It also installs Agent Radio as an MCP server for detected Codex, Claude
-Code, and OpenCode clients unless you pass `--no-mcp`. It does not try to fully
-model your project; edit the YAML afterward.
+In a terminal, `setup` opens a wizard. It can install MCP registrations, scan
+the current directory for repository folders, create sessions for selected
+folders, choose the session command, and append a workspace to the YAML.
+
+When run non-interactively or with flags such as `--agent`, `--no-mcp`, or
+`--force`, `setup` keeps the script-friendly starter behavior.
 
 ## Minimal Config
 

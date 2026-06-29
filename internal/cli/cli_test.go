@@ -92,6 +92,8 @@ func TestSetupDoesNotOverwriteExistingConfig(t *testing.T) {
 
 func TestMCPInstallWritesClientConfigs(t *testing.T) {
 	home := withTempHome(t)
+	bin := filepath.Join(home, ".local", "bin", "agent-radio")
+	withEnv(t, "AGENT_RADIO_BIN", bin)
 
 	var out bytes.Buffer
 	if err := Run([]string{"mcp", "install", "--all"}, &out, &out); err != nil {
@@ -101,13 +103,13 @@ func TestMCPInstallWritesClientConfigs(t *testing.T) {
 	checks := map[string][]string{
 		filepath.Join(home, ".codex", "config.toml"): {
 			"[mcp_servers.agent-radio]",
-			"command = \"agent-radio\"",
+			"command = \"" + bin + "\"",
 			"args = [\"mcp\"]",
 		},
 		filepath.Join(home, ".claude", ".mcp.json"): {
 			"\"mcpServers\"",
 			"\"agent-radio\"",
-			"\"command\": \"agent-radio\"",
+			"\"command\": \"" + bin + "\"",
 		},
 		filepath.Join(home, ".config", "opencode", "opencode.json"): {
 			"\"mcp\"",
@@ -130,6 +132,59 @@ func TestMCPInstallWritesClientConfigs(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Codex: installed") || !strings.Contains(out.String(), "OpenCode: installed") {
 		t.Fatalf("unexpected install output: %s", out.String())
+	}
+}
+
+func TestMCPInstallRepairsStaleConfigs(t *testing.T) {
+	home := withTempHome(t)
+	bin := filepath.Join(home, ".local", "bin", "agent-radio")
+	withEnv(t, "AGENT_RADIO_BIN", bin)
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	claudePath := filepath.Join(home, ".claude", ".mcp.json")
+	openCodePath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(openCodePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte("[mcp_servers.agent-radio]\ncommand = \"/old/agent-radio\"\nargs = [\"mcp\"]\n[mcp_servers.other]\ncommand = \"ok\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"agent-radio":{"command":"/old/agent-radio","args":["mcp"]}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(openCodePath, []byte(`{"mcp":{"agent-radio":{"type":"local","command":["/old/agent-radio","mcp"],"enabled":true}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Run([]string{"mcp", "install", "--all"}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{codexPath, claudePath, openCodePath} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(b)
+		if strings.Contains(got, "/old/agent-radio") {
+			t.Fatalf("%s still contains stale command:\n%s", path, got)
+		}
+		if !strings.Contains(got, bin) {
+			t.Fatalf("%s missing repaired command %q:\n%s", path, bin, got)
+		}
+	}
+	codex, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(codex), "[mcp_servers.other]") {
+		t.Fatalf("codex repair removed following sections:\n%s", string(codex))
 	}
 }
 

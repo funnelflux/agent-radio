@@ -32,6 +32,10 @@ agent-radio mcp install --all
 ```
 
 Existing client config files are backed up before they are changed.
+Existing Agent Radio entries are repaired if they point to an old binary path.
+Generated MCP registrations use the absolute installed `agent-radio` binary path
+where possible, which avoids PATH differences when Codex, Claude Code, or
+OpenCode start MCP servers.
 
 ## Tools
 
