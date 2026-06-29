@@ -15,6 +15,24 @@ Add it to an MCP-capable client with:
 }
 ```
 
+Or install the registration automatically:
+
+```bash
+agent-radio mcp install
+```
+
+With no flags, Agent Radio installs into detected Codex, Claude Code, and
+OpenCode config directories. To force a target:
+
+```bash
+agent-radio mcp install --codex
+agent-radio mcp install --claude
+agent-radio mcp install --opencode
+agent-radio mcp install --all
+```
+
+Existing client config files are backed up before they are changed.
+
 ## Tools
 
 - `agent_radio_context`

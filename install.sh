@@ -53,10 +53,8 @@ Add this to your shell profile:
 
 Then run:
 
-  agent-radio doctor
+  agent-radio setup
 EOF
-else
-  agent-radio doctor || true
 fi
 
 cat <<EOF
@@ -65,9 +63,13 @@ Next steps:
 
   cd /path/to/project
   agent-radio setup
+  agent-radio doctor
   agent-radio up
   agent-radio panel
 
-Edit ~/.config/agent-radio/config.yaml after setup to match your real
-workspaces, repositories, and sessions.
+Setup creates ~/.config/agent-radio/config.yaml and installs the Agent Radio
+MCP server into detected Codex, Claude Code, and OpenCode configs.
+
+Edit the YAML after setup to match your real workspaces, repositories, and
+sessions.
 EOF

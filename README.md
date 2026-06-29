@@ -40,14 +40,14 @@ Optional integrations:
 - OpenCode
 - any other terminal command you can run in tmux
 
-To build from source you also need Go.
+Go is only needed if you are contributing or building from source.
 
 ## Install
 
 ### From GitHub Releases
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/funnelflux/agent-radio/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/funnelflux/agent-radio/master/install.sh | bash
 ```
 
 The installer downloads the matching release binary for Linux, macOS, or WSL and
@@ -65,7 +65,13 @@ Then create a starter config:
 agent-radio setup
 ```
 
+`setup` creates your starter YAML and installs the Agent Radio MCP server into
+detected Codex, Claude Code, and OpenCode config directories. It backs up any
+client config file before changing it.
+
 ### From Source
+
+Source install is for development and contributors:
 
 ```bash
 git clone https://github.com/funnelflux/agent-radio.git
@@ -90,8 +96,10 @@ agent-radio setup
 
 `setup` creates `~/.config/agent-radio/config.yaml` if it does not already
 exist. It uses the current directory as an example workspace and detects
-`opencode`, `codex`, or `claude` if one is installed. It will not overwrite an
-existing config unless you pass `--force`.
+`opencode`, `codex`, or `claude` for the starter session command. It also
+installs Agent Radio as an MCP server for detected Codex, Claude Code, and
+OpenCode clients. It will not overwrite an existing Agent Radio config unless
+you pass `--force`.
 
 Edit the generated YAML so names, paths, roles, descriptions, and sessions match
 your real workspace.
@@ -190,7 +198,7 @@ the default config.
 ## CLI
 
 ```bash
-agent-radio setup [--force] [--agent <command>]
+agent-radio setup [--force] [--agent <command>] [--no-mcp]
 agent-radio up
 agent-radio send <to> <body...>
 agent-radio ask <to> <body...>
@@ -204,6 +212,7 @@ agent-radio sessions
 agent-radio doctor
 agent-radio panel
 agent-radio mcp
+agent-radio mcp install [--codex] [--claude] [--opencode] [--all]
 ```
 
 Message example:
@@ -288,6 +297,15 @@ Example MCP config:
 }
 ```
 
+You can install the MCP registration automatically:
+
+```bash
+agent-radio mcp install
+```
+
+With no flags it installs into detected client config directories. Use
+`--codex`, `--claude`, `--opencode`, or `--all` to force specific targets.
+
 Inbound messages are untrusted text. Agents should inspect messages and decide
 what to do; the MCP server does not execute message bodies.
 
@@ -357,7 +375,6 @@ the stable asset names used by `install.sh`.
 
 ## Roadmap
 
-- MCP installer helpers for Codex, Claude Code, and OpenCode
 - richer `doctor` prerequisite checks
 - packaged Homebrew and npm wrapper installers
 

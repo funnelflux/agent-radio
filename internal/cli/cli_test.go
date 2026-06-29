@@ -23,8 +23,16 @@ func withEnv(t *testing.T, key, val string) {
 	})
 }
 
+func withTempHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	withEnv(t, "HOME", home)
+	return home
+}
+
 func TestSetupCreatesStarterConfig(t *testing.T) {
 	dir := t.TempDir()
+	withTempHome(t)
 	configPath := filepath.Join(dir, "config.yaml")
 	withEnv(t, "AGENT_RADIO_CONFIG", configPath)
 	oldWD, err := os.Getwd()
@@ -59,6 +67,7 @@ func TestSetupCreatesStarterConfig(t *testing.T) {
 
 func TestSetupDoesNotOverwriteExistingConfig(t *testing.T) {
 	dir := t.TempDir()
+	withTempHome(t)
 	configPath := filepath.Join(dir, "config.yaml")
 	withEnv(t, "AGENT_RADIO_CONFIG", configPath)
 	if err := os.WriteFile(configPath, []byte("sentinel\n"), 0o644); err != nil {
@@ -78,6 +87,49 @@ func TestSetupDoesNotOverwriteExistingConfig(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "already exists") {
 		t.Fatalf("setup did not report existing config: %s", out.String())
+	}
+}
+
+func TestMCPInstallWritesClientConfigs(t *testing.T) {
+	home := withTempHome(t)
+
+	var out bytes.Buffer
+	if err := Run([]string{"mcp", "install", "--all"}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := map[string][]string{
+		filepath.Join(home, ".codex", "config.toml"): {
+			"[mcp_servers.agent-radio]",
+			"command = \"agent-radio\"",
+			"args = [\"mcp\"]",
+		},
+		filepath.Join(home, ".claude", ".mcp.json"): {
+			"\"mcpServers\"",
+			"\"agent-radio\"",
+			"\"command\": \"agent-radio\"",
+		},
+		filepath.Join(home, ".config", "opencode", "opencode.json"): {
+			"\"mcp\"",
+			"\"agent-radio\"",
+			"\"type\": \"local\"",
+			"\"command\": [",
+		},
+	}
+	for path, wants := range checks {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("missing generated config %s: %v", path, err)
+		}
+		got := string(b)
+		for _, want := range wants {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s missing %q:\n%s", path, want, got)
+			}
+		}
+	}
+	if !strings.Contains(out.String(), "Codex: installed") || !strings.Contains(out.String(), "OpenCode: installed") {
+		t.Fatalf("unexpected install output: %s", out.String())
 	}
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -56,6 +57,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	case "panel":
 		return panel.Run(ctx)
 	case "mcp":
+		if len(args) > 1 && args[1] == "install" {
+			return installMCP(stdout, args[2:])
+		}
 		return mcp.Serve(ctx, os.Stdin, stdout)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
@@ -66,7 +70,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `agent-radio: local tmux control room and message bus for agents
 
 Commands:
-  setup [--force] [--agent <command>]
+  setup [--force] [--agent <command>] [--no-mcp]
   up
   send <to> <body...>
   ask <to> <body...>
@@ -79,7 +83,8 @@ Commands:
   sessions
   doctor
   panel
-  mcp`)
+  mcp
+  mcp install [--codex] [--claude] [--opencode] [--all]`)
 }
 
 func setup(ctx context.Context, out io.Writer, args []string) error {
@@ -88,6 +93,7 @@ func setup(ctx context.Context, out io.Writer, args []string) error {
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "overwrite existing config")
 	agentCommand := fs.String("agent", "", "default agent command for starter config")
+	noMCP := fs.Bool("no-mcp", false, "skip MCP client registration")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -109,6 +115,11 @@ func setup(ctx context.Context, out io.Writer, args []string) error {
 	if _, err := os.Stat(configPath); err == nil && !*force {
 		fmt.Fprintf(out, "Agent Radio config already exists:\n  %s\n\n", configPath)
 		fmt.Fprintln(out, "Edit that YAML to define your workspaces, repositories, and sessions.")
+		if !*noMCP {
+			if err := installMCPForDetectedClients(out); err != nil {
+				return err
+			}
+		}
 		fmt.Fprintln(out, "Then run:")
 		fmt.Fprintln(out, "  agent-radio doctor")
 		fmt.Fprintln(out, "  agent-radio up")
@@ -125,11 +136,284 @@ func setup(ctx context.Context, out io.Writer, args []string) error {
 	}
 	fmt.Fprintf(out, "Created starter config:\n  %s\n\n", configPath)
 	fmt.Fprintln(out, "Edit the YAML paths, names, roles, descriptions, and sessions for your real workspace.")
+	if !*noMCP {
+		if err := installMCPForDetectedClients(out); err != nil {
+			return err
+		}
+	}
 	fmt.Fprintln(out, "Then run:")
 	fmt.Fprintln(out, "  agent-radio doctor")
 	fmt.Fprintln(out, "  agent-radio up")
 	fmt.Fprintln(out, "  agent-radio panel")
 	return nil
+}
+
+func installMCP(out io.Writer, args []string) error {
+	fs := flag.NewFlagSet("mcp install", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	codex := fs.Bool("codex", false, "install Codex MCP registration")
+	claude := fs.Bool("claude", false, "install Claude Code MCP registration")
+	opencode := fs.Bool("opencode", false, "install OpenCode MCP registration")
+	all := fs.Bool("all", false, "install all supported MCP registrations")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	selected := mcpInstallSelection{Codex: *codex || *all, Claude: *claude || *all, OpenCode: *opencode || *all}
+	if !selected.Any() {
+		selected = detectMCPClients()
+	}
+	if !selected.Any() {
+		fmt.Fprintln(out, "No Codex, Claude Code, or OpenCode config directory was detected.")
+		fmt.Fprintln(out, "Run one of these explicitly if you want Agent Radio to create the config:")
+		fmt.Fprintln(out, "  agent-radio mcp install --codex")
+		fmt.Fprintln(out, "  agent-radio mcp install --claude")
+		fmt.Fprintln(out, "  agent-radio mcp install --opencode")
+		return nil
+	}
+	return installSelectedMCP(out, selected)
+}
+
+type mcpInstallSelection struct {
+	Codex    bool
+	Claude   bool
+	OpenCode bool
+}
+
+func (s mcpInstallSelection) Any() bool {
+	return s.Codex || s.Claude || s.OpenCode
+}
+
+func installMCPForDetectedClients(out io.Writer) error {
+	selected := detectMCPClients()
+	if !selected.Any() {
+		fmt.Fprintln(out, "\nMCP: no Codex, Claude Code, or OpenCode config directory detected.")
+		fmt.Fprintln(out, "MCP: run `agent-radio mcp install --codex`, `--claude`, or `--opencode` after installing a client.")
+		return nil
+	}
+	return installSelectedMCP(out, selected)
+}
+
+func detectMCPClients() mcpInstallSelection {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return mcpInstallSelection{}
+	}
+	return mcpInstallSelection{
+		Codex:    pathExists(filepath.Join(home, ".codex")) || commandExists("codex"),
+		Claude:   pathExists(filepath.Join(home, ".claude")) || commandExists("claude"),
+		OpenCode: pathExists(filepath.Join(home, ".config", "opencode")) || commandExists("opencode"),
+	}
+}
+
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func installSelectedMCP(out io.Writer, selected mcpInstallSelection) error {
+	fmt.Fprintln(out, "\nMCP registrations:")
+	if selected.Codex {
+		if err := installCodexMCP(out); err != nil {
+			return err
+		}
+	}
+	if selected.Claude {
+		if err := installClaudeMCP(out); err != nil {
+			return err
+		}
+	}
+	if selected.OpenCode {
+		if err := installOpenCodeMCP(out); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func installCodexMCP(out io.Writer) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(home, ".codex", "config.toml")
+	block := "\n[mcp_servers.agent-radio]\ncommand = \"agent-radio\"\nargs = [\"mcp\"]\n"
+	changed, err := appendBlockIfMissing(path, "[mcp_servers.agent-radio]", block)
+	if err != nil {
+		return err
+	}
+	printMCPResult(out, "Codex", path, changed)
+	return nil
+}
+
+func installClaudeMCP(out io.Writer) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(home, ".claude", ".mcp.json")
+	changed, err := upsertJSONMCPServer(path, "claude")
+	if err != nil {
+		return err
+	}
+	printMCPResult(out, "Claude Code", path, changed)
+	return nil
+}
+
+func installOpenCodeMCP(out io.Writer) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(home, ".config", "opencode", "opencode.json")
+	changed, err := upsertOpenCodeMCP(path)
+	if err != nil {
+		return err
+	}
+	printMCPResult(out, "OpenCode", path, changed)
+	return nil
+}
+
+func printMCPResult(out io.Writer, name, path string, changed bool) {
+	if changed {
+		fmt.Fprintf(out, "  %s: installed agent-radio MCP -> %s\n", name, path)
+		return
+	}
+	fmt.Fprintf(out, "  %s: already configured -> %s\n", name, path)
+}
+
+func appendBlockIfMissing(path, marker, block string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if strings.Contains(string(b), marker) {
+		return false, nil
+	}
+	if len(b) > 0 {
+		if err := backupFile(path); err != nil {
+			return false, err
+		}
+	}
+	next := strings.TrimRight(string(b), "\n") + block
+	return true, os.WriteFile(path, []byte(next), 0o644)
+}
+
+func upsertJSONMCPServer(path, shape string) (bool, error) {
+	root, existed, err := readJSONObject(path)
+	if err != nil {
+		return false, err
+	}
+	servers, _ := root["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+		root["mcpServers"] = servers
+	}
+	desired := map[string]any{"command": "agent-radio", "args": []any{"mcp"}}
+	if shape == "claude" {
+		desired = map[string]any{"command": "agent-radio", "args": []any{"mcp"}}
+	}
+	if jsonEqual(servers["agent-radio"], desired) {
+		return false, nil
+	}
+	servers["agent-radio"] = desired
+	if existed {
+		if err := backupFile(path); err != nil {
+			return false, err
+		}
+	}
+	return true, writeJSONObject(path, root)
+}
+
+func upsertOpenCodeMCP(path string) (bool, error) {
+	root, existed, err := readJSONObject(path)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := root["$schema"]; !ok {
+		root["$schema"] = "https://opencode.ai/config.json"
+	}
+	servers, _ := root["mcp"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+		root["mcp"] = servers
+	}
+	desired := map[string]any{
+		"type":    "local",
+		"command": []any{"agent-radio", "mcp"},
+		"enabled": true,
+	}
+	if jsonEqual(servers["agent-radio"], desired) {
+		return false, nil
+	}
+	servers["agent-radio"] = desired
+	if existed {
+		if err := backupFile(path); err != nil {
+			return false, err
+		}
+	}
+	return true, writeJSONObject(path, root)
+}
+
+func readJSONObject(path string) (map[string]any, bool, error) {
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]any{}, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return map[string]any{}, true, nil
+	}
+	var root map[string]any
+	if err := json.Unmarshal(b, &root); err != nil {
+		return nil, false, fmt.Errorf("cannot parse %s: %w", path, err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+	return root, true, nil
+}
+
+func writeJSONObject(path string, root map[string]any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(path, b, 0o644)
+}
+
+func jsonEqual(a, b any) bool {
+	ab, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(ab) == string(bb)
+}
+
+func backupFile(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().Format("20060102-150405"))
+	return os.WriteFile(backup, b, 0o644)
 }
 
 func detectAgentCommand() string {
@@ -433,13 +717,20 @@ func doctor(ctx context.Context, out io.Writer) error {
 		defer st.Close()
 	}
 	_, tmuxErr := exec.LookPath("tmux")
-	fmt.Fprintf(out, "identity: %s\n", valueOrErr(id, idErr))
+	fmt.Fprintf(out, "identity: %s\n", identityStatus(id, idErr))
 	fmt.Fprintf(out, "state_db: %s\n", valueOrErr(path, dbErr))
 	fmt.Fprintf(out, "tmux: %s\n", valueOrErr("available", tmuxErr))
 	fmt.Fprintf(out, "router_session: %s\n", routerStatus(ctx, tmuxErr))
 	fmt.Fprintf(out, "session_count: %s\n", sessionCount(ctx, tmuxErr))
 	fmt.Fprintf(out, "schema: %s\n", schemaStatus(ctx, st, dbErr))
 	return nil
+}
+
+func identityStatus(id string, err error) string {
+	if err != nil {
+		return "not set (normal outside an agent session)"
+	}
+	return id
 }
 
 func valueOrErr(v string, err error) string {
