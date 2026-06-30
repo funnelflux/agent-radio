@@ -21,6 +21,7 @@ import (
 	"github.com/funnelflux/agent-radio/internal/panel"
 	"github.com/funnelflux/agent-radio/internal/store"
 	"github.com/funnelflux/agent-radio/internal/tmuxradio"
+	"github.com/funnelflux/agent-radio/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,6 +34,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx := context.Background()
 	switch args[0] {
+	case "--version", "version":
+		_, err := fmt.Fprintf(stdout, "agent-radio %s\n", version.Version)
+		return err
 	case "setup":
 		return setup(ctx, stdout, args[1:])
 	case "up":
@@ -86,6 +90,7 @@ Commands:
   sessions
   doctor
   panel
+  version
   mcp
   mcp install [--codex] [--claude] [--opencode] [--all]`)
 }

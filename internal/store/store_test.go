@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -160,5 +162,32 @@ func TestSchemaVersionIsRecorded(t *testing.T) {
 	}
 	if version != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, SchemaVersion)
+	}
+}
+
+func TestOpenDefaultCreatesPrivateStateFiles(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("AGENT_RADIO_STATE_DIR", dir)
+
+	st, path, err := OpenDefault(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("state dir mode = %o, want 700", got)
+	}
+	dbInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dbInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("state db mode = %o, want 600", got)
 	}
 }

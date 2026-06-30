@@ -15,6 +15,29 @@ It is intended to be small, inspectable, and easy to install as a single binary.
 5. Use `rg` or `find` for discovery.
 6. Use `apply_patch` for manual file edits when working through an agent.
 
+
+## Commit And PR Release Semantics
+
+AI agents that create commits, branches, or PRs must use Conventional Commit
+semantics so the auto-release workflow can infer the correct tag bump when a PR
+is merged into `master`.
+
+- `fix: ...` for bug fixes and small safe corrections; defaults to patch.
+- `docs: ...`, `test: ...`, `refactor: ...`, `chore: ...`, and similar
+  non-feature changes also default to patch unless the PR has `release:none`.
+- `feat: ...` for user-visible features; triggers a minor release.
+- `type(scope): ...` is allowed, for example `feat(panel): show sessions`.
+- `type!: ...` or a commit/PR body containing `BREAKING CHANGE:` marks a
+  breaking change; triggers a major release.
+- For docs-only, CI-only, or internal-only PRs that should not publish a
+  release, add the `release:none` PR label.
+- If inference is wrong or ambiguous, add exactly one explicit PR label:
+  `release:major`, `release:minor`, `release:patch`, or `release:none`.
+
+When opening a release PR from `develop` to `master`, make the PR title follow
+the same convention because the release workflow reads the merged PR title/body
+and labels.
+
 ## Build And Test
 
 ```bash
@@ -67,6 +90,7 @@ agent-radio watch [--all]
 agent-radio sessions
 agent-radio doctor
 agent-radio panel
+agent-radio version
 agent-radio mcp
 ```
 

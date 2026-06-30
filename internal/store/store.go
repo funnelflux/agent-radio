@@ -59,10 +59,20 @@ func OpenDefault(ctx context.Context) (*Store, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, "", err
 	}
 	path := filepath.Join(dir, "radio.sqlite")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := f.Close(); err != nil {
+		return nil, "", err
+	}
 	st, err := Open(ctx, path)
 	if err != nil {
 		return nil, "", err
