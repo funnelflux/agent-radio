@@ -1229,6 +1229,15 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 	}
 	defer st.Close()
 	last, _ := st.MaxID(ctx)
+	if *route {
+		if pending, err := st.PendingRoutes(ctx, *all, agent); err == nil {
+			for _, msg := range pending {
+				fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
+				routeMessage(ctx, msg)
+				_ = st.MarkRouted(ctx, msg.To, msg)
+			}
+		}
+	}
 	for {
 		msgs, err := st.Since(ctx, last, *all, agent)
 		if err != nil {
@@ -1239,6 +1248,7 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 			fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
 			if *route {
 				routeMessage(ctx, msg)
+				_ = st.MarkRouted(ctx, msg.To, msg)
 			}
 		}
 		time.Sleep(2 * time.Second)

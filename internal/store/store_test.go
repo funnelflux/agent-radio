@@ -81,6 +81,44 @@ func TestBroadcastUnreadAndSenderFiltering(t *testing.T) {
 	}
 }
 
+func TestPendingRoutesTracksRoutedWithoutMarkingRead(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, t.TempDir()+"/radio.sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	msg, err := st.Insert(ctx, "codex-a", "codex-b", KindAsk, "need review", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := st.PendingRoutes(ctx, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != msg.ID {
+		t.Fatalf("pending routes = %#v, want message %d", pending, msg.ID)
+	}
+	if err := st.MarkRouted(ctx, "codex-b", msg); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = st.PendingRoutes(ctx, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("routed message still pending: %#v", pending)
+	}
+	unread, err := st.UnreadCount(ctx, "codex-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unread != 1 {
+		t.Fatalf("unread after route = %d, want 1", unread)
+	}
+}
+
 func TestPruneRemovesOldMessages(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(ctx, t.TempDir()+"/radio.sqlite")

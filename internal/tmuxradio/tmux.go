@@ -6,26 +6,55 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Session struct {
-	Name string
+	Name         string
+	PaneTitle    string
+	PaneCommand  string
+	LastActivity time.Time
 }
 
 func Sessions(ctx context.Context) ([]Session, error) {
-	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}")
+	format := strings.Join([]string{
+		"#{session_name}",
+		"#{pane_title}",
+		"#{pane_current_command}",
+		"#{window_activity}",
+	}, "\t")
+	cmd := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", format)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 	var sessions []Session
+	seen := map[string]bool{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			sessions = append(sessions, Session{Name: line})
+		fields := strings.SplitN(line, "\t", 4)
+		if len(fields) == 0 {
+			continue
 		}
+		name := strings.TrimSpace(fields[0])
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		session := Session{Name: name}
+		if len(fields) > 1 {
+			session.PaneTitle = strings.TrimSpace(fields[1])
+		}
+		if len(fields) > 2 {
+			session.PaneCommand = strings.TrimSpace(fields[2])
+		}
+		if len(fields) > 3 {
+			if unix, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64); err == nil && unix > 0 {
+				session.LastActivity = time.Unix(unix, 0)
+			}
+		}
+		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }

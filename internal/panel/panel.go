@@ -25,15 +25,19 @@ const (
 )
 
 type sessionState struct {
-	cfg       config.Session
-	alive     bool
-	active    bool
-	unread    int
-	latest    string
-	snapshot  string
-	history   []store.Message
-	pathOK    bool
-	lastError string
+	cfg          config.Session
+	alive        bool
+	active       bool
+	activity     string
+	paneTitle    string
+	paneCommand  string
+	lastActivity time.Time
+	unread       int
+	latest       string
+	snapshot     string
+	history      []store.Message
+	pathOK       bool
+	lastError    string
 }
 
 type workspaceState struct {
@@ -397,9 +401,11 @@ func (m *model) refresh() tea.Msg {
 	defer cancel()
 	ss, tmuxErr := tmuxradio.Sessions(ctx)
 	sessionMap := map[string]bool{}
+	tmuxInfo := map[string]tmuxradio.Session{}
 	if tmuxErr == nil {
 		for _, s := range ss {
 			sessionMap[s.Name] = true
+			tmuxInfo[s.Name] = s
 		}
 	}
 	st, _, dbErr := store.OpenDefault(ctx)
@@ -422,6 +428,11 @@ func (m *model) refresh() tea.Msg {
 		wsv := workspaceState{cfg: ws}
 		for _, s := range ws.Sessions {
 			state := sessionState{cfg: s, alive: sessionMap[s.Name], pathOK: pathExists(s.Path)}
+			if info, ok := tmuxInfo[s.Name]; ok {
+				state.paneTitle = info.PaneTitle
+				state.paneCommand = info.PaneCommand
+				state.lastActivity = info.LastActivity
+			}
 			if st != nil {
 				state.unread, _ = st.UnreadCount(ctx, s.AgentID)
 				if latest, ok, err := st.LatestForAgent(ctx, s.AgentID); err == nil && ok {
@@ -440,6 +451,7 @@ func (m *model) refresh() tea.Msg {
 					}
 				}
 			}
+			state.activity = classifyActivity(state, time.Now())
 			wsv.unread += state.unread
 			wsv.sessions = append(wsv.sessions, state)
 		}
@@ -615,6 +627,9 @@ func (m *model) View() string {
 		return "loading\n"
 	}
 	lines := []string{m.header(), m.navBar()}
+	if !m.router {
+		lines = append(lines, m.routerWarning())
+	}
 	switch m.tab {
 	case tabWorkspaces:
 		lines = append(lines, m.workspacesView())
@@ -760,7 +775,14 @@ func (m *model) detailBox(width, height int) string {
 		"Path: "+cropPlain(s.cfg.Path, width-12),
 		"Command: "+cropPlain(s.cfg.Command, width-15),
 		"Agent ID: "+s.cfg.AgentID,
+		"Activity: "+activityLabel(s),
 	)
+	if s.paneTitle != "" {
+		lines = append(lines, "Pane title: "+cropPlain(s.paneTitle, width-17))
+	}
+	if s.paneCommand != "" {
+		lines = append(lines, "Pane command: "+cropPlain(s.paneCommand, width-19))
+	}
 	if len(s.cfg.Tags) > 0 {
 		lines = append(lines, "Tags: "+strings.Join(s.cfg.Tags, ", "))
 	}
@@ -884,7 +906,7 @@ func (m *model) isMobile() bool {
 }
 
 func (m *model) contentHeight() int {
-	return max(2, m.height-m.headerHeight()-2)
+	return max(2, m.height-m.headerHeight()-2-m.routerWarningHeight())
 }
 
 func (m *model) headerHeight() int {
@@ -899,11 +921,23 @@ func (m *model) navY() int {
 }
 
 func (m *model) contentY() int {
-	return m.headerHeight() + 1
+	return m.headerHeight() + 1 + m.routerWarningHeight()
 }
 
 func (m *model) statusLine() string {
 	return strings.Join([]string{badge("router", m.router), badge("tmux", m.tmuxOK), goodStyle.Render("db " + m.dbStatus)}, "  ")
+}
+
+func (m *model) routerWarningHeight() int {
+	if m.router {
+		return 0
+	}
+	return 1
+}
+
+func (m *model) routerWarning() string {
+	msg := "router is not running - messages will queue but will not route to tmux panes. Run agent-radio up."
+	return warnStyle.Render(cropPlain(msg, m.width))
 }
 
 func (m *model) fitToScreen(s string) string {
@@ -1108,36 +1142,103 @@ func sessionColumns(width int) (nameW, typeW, statusW, countW, activityW int) {
 }
 
 func activityIndicator(s sessionState, frame int, width int) string {
-	if !s.alive {
-		return mutedStyle.Render(padPlain("idle", width))
+	label := activityPlain(s, frame, width)
+	switch activityLabel(s) {
+	case "work":
+		return goodStyle.Render(label)
+	case "wait":
+		return warnStyle.Render(label)
+	case "input":
+		return badStyle.Render(label)
+	default:
+		return mutedStyle.Render(label)
 	}
-	if s.active {
-		return goodStyle.Render(padPlain(activityPulse(frame), width))
-	}
-	return mutedStyle.Render(padPlain("idle", width))
 }
 
 func activityPlain(s sessionState, frame int, width int) string {
-	if !s.alive || !s.active {
-		return padPlain("idle", width)
+	if activityLabel(s) == "work" {
+		return padPlain(activityPulse(frame), width)
 	}
-	return padPlain(activityPulse(frame), width)
+	return padPlain(activityLabel(s), width)
 }
 
 func activityPulse(frame int) string {
 	frames := []string{
-		"⠋ active",
-		"⠙ active",
-		"⠹ active",
-		"⠸ active",
-		"⠼ active",
-		"⠴ active",
-		"⠦ active",
-		"⠧ active",
-		"⠇ active",
-		"⠏ active",
+		"⠋ work",
+		"⠙ work",
+		"⠹ work",
+		"⠸ work",
+		"⠼ work",
+		"⠴ work",
+		"⠦ work",
+		"⠧ work",
+		"⠇ work",
+		"⠏ work",
 	}
 	return frames[frame%len(frames)]
+}
+
+func activityLabel(s sessionState) string {
+	if !s.alive {
+		return "idle"
+	}
+	if s.activity != "" {
+		return s.activity
+	}
+	if s.active {
+		return "work"
+	}
+	return "idle"
+}
+
+func classifyActivity(s sessionState, now time.Time) string {
+	if !s.alive {
+		return "idle"
+	}
+	title := strings.ToLower(strings.TrimSpace(s.paneTitle))
+	snap := strings.ToLower(s.snapshot)
+	haystack := title + "\n" + snap
+
+	if containsAny(haystack, []string{
+		"permission", "approve", "approval", "allow", "deny", "confirm", "continue?",
+		"press enter", "press y", "input required", "waiting for user",
+	}) {
+		return "input"
+	}
+	if hasSpinnerPrefix(strings.TrimSpace(s.paneTitle)) || s.active {
+		return "work"
+	}
+	if strings.Contains(title, "opencode") {
+		return "idle"
+	}
+	if title != "" && !strings.EqualFold(title, s.paneCommand) {
+		return "wait"
+	}
+	if !s.lastActivity.IsZero() && now.Sub(s.lastActivity) < 12*time.Second {
+		return "work"
+	}
+	return "idle"
+}
+
+func hasSpinnerPrefix(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, prefix := range []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"} {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func agentType(s config.Session) string {

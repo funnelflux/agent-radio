@@ -51,7 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/funnelflux/agent-radio/master/insta
 ```
 
 The installer downloads the matching release binary for Linux, macOS, or WSL and
-places it in `~/.local/bin` by default.
+places it in `~/.local/bin` by default. It checks for `tmux` before installing
+and stops with OS-specific install guidance if `tmux` is missing.
 
 If `~/.local/bin` is not on `PATH`, add it to your shell:
 
