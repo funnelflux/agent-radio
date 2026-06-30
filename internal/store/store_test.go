@@ -191,3 +191,32 @@ func TestOpenDefaultCreatesPrivateStateFiles(t *testing.T) {
 		t.Fatalf("state db mode = %o, want 600", got)
 	}
 }
+
+func TestOpenDefaultHardensExistingStateDB(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "radio.sqlite")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT_RADIO_STATE_DIR", dir)
+
+	st, gotPath, err := OpenDefault(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if gotPath != path {
+		t.Fatalf("path = %q, want %q", gotPath, path)
+	}
+	dbInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dbInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("state db mode = %o, want 600", got)
+	}
+}

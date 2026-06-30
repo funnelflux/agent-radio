@@ -67,8 +67,6 @@ jobs:
           labels="$(jq -r '.pull_request.labels[].name // empty' "$EVENT_PATH" | tr '[:upper:]' '[:lower:]')"
           title="$(jq -r '.pull_request.title // ""' "$EVENT_PATH")"
           body="$(jq -r '.pull_request.body // ""' "$EVENT_PATH")"
-          text="$title
-          $body"
 
           if printf '%s\n' "$labels" | grep -qx 'release:none'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -83,9 +81,11 @@ jobs:
             bump="minor"
           elif printf '%s\n' "$labels" | grep -Eqx 'release:patch|semver:patch'; then
             bump="patch"
-          elif printf '%s\n' "$text" | grep -Eiq '(^|[^[:alnum:]])BREAKING CHANGE|!:'; then
+          elif printf '%s\n' "$title" | grep -Eiq '^[[:alnum:]_-]+(\([^)]+\))?!:'; then
             bump="major"
-          elif printf '%s\n' "$title" | grep -Eiq '^feat(\(.+\))?!?:'; then
+          elif printf '%s\n' "$body" | grep -Eiq '^BREAKING[ -]CHANGE:'; then
+            bump="major"
+          elif printf '%s\n' "$title" | grep -Eiq '^feat(\(.+\))?:'; then
             bump="minor"
           fi
 
@@ -150,7 +150,7 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Build release artifacts
         run: VERSION="${{ needs.tag-release.outputs.tag }}" scripts/build-release.sh

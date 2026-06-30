@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/funnelflux/agent-radio/internal/version"
 )
 
 func TestServeInitializeListAndMessageFlow(t *testing.T) {
@@ -89,9 +91,8 @@ workspaces:
 	if responses[0]["error"] != nil {
 		t.Fatalf("initialize error: %#v", responses[0]["error"])
 	}
-	serverInfo := nested(t, responses[0], "result", "serverInfo")
-	if !strings.Contains(toJSON(t, serverInfo), `"version":"dev"`) {
-		t.Fatalf("initialize serverInfo missing dev version: %#v", serverInfo)
+	if got := nested(t, responses[0], "result", "serverInfo", "version"); got != version.Version {
+		t.Fatalf("initialize serverInfo version = %v, want %q", got, version.Version)
 	}
 	tools := nested(t, responses[1], "result", "tools")
 	if tools == nil {

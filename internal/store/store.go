@@ -70,6 +70,10 @@ func OpenDefault(ctx context.Context) (*Store, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return nil, "", err
+	}
 	if err := f.Close(); err != nil {
 		return nil, "", err
 	}
