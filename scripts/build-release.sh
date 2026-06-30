@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="${DIST_DIR:-"$repo_root/dist"}"
 version="${VERSION:-dev}"
+version_pkg="github.com/funnelflux/agent-radio/internal/version"
 
 mkdir -p "$dist_dir"
 rm -f "$dist_dir"/agent-radio-* "$dist_dir"/checksums.txt
@@ -20,8 +21,10 @@ for target in "${targets[@]}"; do
   arch="${target#*/}"
   out="$dist_dir/agent-radio-$os-$arch"
   GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-    go build -trimpath -ldflags "-s -w" -o "$out" "$repo_root/cmd/agent-radio"
+    go build -trimpath -ldflags "-s -w -X $version_pkg.Version=$version" -o "$out" "$repo_root/cmd/agent-radio"
 done
+
+cp "$repo_root/shell/agent-radio.sh" "$dist_dir/agent-radio-shell-helpers.sh"
 
 (
   cd "$dist_dir"

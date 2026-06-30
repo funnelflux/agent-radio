@@ -59,10 +59,20 @@ func OpenDefault(ctx context.Context) (*Store, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, "", err
 	}
 	path := filepath.Join(dir, "radio.sqlite")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := f.Close(); err != nil {
+		return nil, "", err
+	}
 	st, err := Open(ctx, path)
 	if err != nil {
 		return nil, "", err
@@ -124,6 +134,12 @@ CREATE TABLE IF NOT EXISTS inbox_views (
   message_id INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (agent, n)
+);
+CREATE TABLE IF NOT EXISTS routes (
+  agent TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  routed_at TEXT NOT NULL,
+  PRIMARY KEY (agent, message_id)
 );
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY,
@@ -320,6 +336,39 @@ LIMIT ?`, agent, agent, limit)
 		return nil, err
 	}
 	return collect(rows)
+}
+
+func (s *Store) PendingRoutes(ctx context.Context, all bool, agent string) ([]Message, error) {
+	query := `
+SELECT id,ts,sender,recipient,kind,body,reply_to,thread_id,status
+FROM messages
+WHERE status='open'
+  AND recipient<>'all'
+  AND NOT EXISTS (
+    SELECT 1 FROM routes
+    WHERE routes.agent=messages.recipient
+      AND routes.message_id=messages.id
+  )`
+	args := []any{}
+	if !all {
+		query += ` AND (recipient=? OR recipient='all') AND sender<>?`
+		args = append(args, agent, agent)
+	}
+	query += ` ORDER BY id`
+	rows, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows)
+}
+
+func (s *Store) MarkRouted(ctx context.Context, agent string, msg Message) error {
+	if strings.TrimSpace(agent) == "" || agent == "all" {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO routes(agent,message_id,routed_at) VALUES(?,?,?)`, agent, msg.ID, now)
+	return err
 }
 
 func (s *Store) SaveView(ctx context.Context, agent string, msgs []Message) error {

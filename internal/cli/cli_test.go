@@ -246,3 +246,13 @@ func TestDoctorReportsHealth(t *testing.T) {
 		}
 	}
 }
+
+func TestVersionCommandPrintsVersion(t *testing.T) {
+	var out bytes.Buffer
+	if err := Run([]string{"version"}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "agent-radio dev" {
+		t.Fatalf("version output = %q, want %q", got, "agent-radio dev")
+	}
+}

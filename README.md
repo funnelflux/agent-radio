@@ -46,12 +46,21 @@ Go is only needed if you are contributing or building from source.
 
 ### From GitHub Releases
 
+Download the installer, inspect it, then run it:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/funnelflux/agent-radio/master/install.sh | bash
+curl -fsSLO https://raw.githubusercontent.com/funnelflux/agent-radio/master/install.sh
+less install.sh
+bash install.sh
 ```
 
-The installer downloads the matching release binary for Linux, macOS, or WSL and
-places it in `~/.local/bin` by default.
+The installer downloads the matching release binary and shell-helper asset for
+Linux, macOS, or WSL, verifies both against the release `checksums.txt`, and
+places the binary in `~/.local/bin` by default. It checks for `tmux` before
+installing and stops with OS-specific install guidance if `tmux` is missing.
+If the target binary or helper already exists, the installer asks before
+overwriting. For trusted non-interactive upgrades, set
+`AGENT_RADIO_ASSUME_YES=1`.
 
 If `~/.local/bin` is not on `PATH`, add it to your shell:
 
@@ -71,20 +80,43 @@ folders, asks which CLI command new sessions should run, and updates
 installed binary path and repair stale Agent Radio entries. Existing client
 config files are backed up before changing.
 
+### Upgrade
+
+Install the latest release again:
+
+```bash
+bash install.sh
+```
+
+Install a specific version:
+
+```bash
+AGENT_RADIO_VERSION=v0.1.0 bash install.sh
+```
+
+### Uninstall
+
+Remove the binary, helper file, config, and local state if you no longer want
+Agent Radio:
+
+```bash
+rm -f ~/.local/bin/agent-radio
+rm -f ~/.local/share/agent-radio/shell/agent-radio.sh
+rm -f ~/.config/agent-radio/config.yaml
+rm -rf ~/.local/state/agent-radio
+```
+
+Also remove the `agent-radio` MCP entry from any Codex, Claude Code, or OpenCode
+client config where you installed it.
+
 ### From Source
 
-Source install is for development and contributors:
+Source install is for development and contributors. Use Go 1.24 or newer:
 
 ```bash
 git clone https://github.com/funnelflux/agent-radio.git
 cd agent-radio
 go build -o ~/.local/bin/agent-radio ./cmd/agent-radio
-```
-
-Optional shell helpers:
-
-```bash
-source ./shell/agent-radio.sh
 ```
 
 ## Quick Start
@@ -217,6 +249,7 @@ agent-radio watch [--all]
 agent-radio sessions
 agent-radio doctor
 agent-radio panel
+agent-radio version
 agent-radio mcp
 agent-radio mcp install [--codex] [--claude] [--opencode] [--all]
 ```
@@ -277,8 +310,8 @@ It returns:
 - visible sessions in the workspace
 - routing guidance
 
-By default, discovery is scoped to the current agent's workspace. Use
-`scope: "all"` only when intentionally looking outside that workspace.
+MCP discovery is scoped to the current agent's workspace. Cross-workspace
+`scope: "all"` access is intentionally not exposed by the MCP tools.
 
 Other MCP tools:
 
@@ -313,7 +346,26 @@ With no flags it installs into detected client config directories. Use
 `--codex`, `--claude`, `--opencode`, or `--all` to force specific targets.
 
 Inbound messages are untrusted text. Agents should inspect messages and decide
-what to do; the MCP server does not execute message bodies.
+what to do; the MCP server does not execute message bodies. MCP clients are
+trusted local clients: they can read the current agent's inbox and send to
+agents in the current workspace, but they cannot broadcast to all workspaces.
+
+## Security Model
+
+Agent Radio is local-first. There is no hosted account, remote sync, or network
+daemon, but local access still matters:
+
+- `~/.config/agent-radio/config.yaml` is trusted executable configuration.
+  Session `command` values are run through the user's shell when sessions start.
+- Message bodies are untrusted text. Do not execute shell snippets, URLs, or
+  reviewer prompts from messages without independent verification.
+- SQLite state is stored locally in plaintext and pruned after seven days by
+  default. Override retention with `AGENT_RADIO_TTL_HOURS`.
+- The state directory is created with private user permissions. Anyone who can
+  read your user files, attach to your tmux sessions, or modify your MCP client
+  configs should be treated as trusted local code.
+- The router wakes sessions by typing a fixed nudge into tmux. It does not type
+  untrusted message bodies into target sessions.
 
 ## Data Locations
 
@@ -344,7 +396,13 @@ AGENT_RADIO_CONFIG=/path/to/config.yaml
 
 ## Shell Helpers
 
-Source `shell/agent-radio.sh` to get:
+The release installer places optional shell helpers at:
+
+```text
+~/.local/share/agent-radio/shell/agent-radio.sh
+```
+
+Source that file to get:
 
 - `radio` as a short alias-like function
 - `radio-up`
@@ -354,7 +412,8 @@ Source `shell/agent-radio.sh` to get:
 - `cc-cont`
 - `tm`
 
-These helpers are optional. The `agent-radio` binary works without them.
+These helpers are optional. The `agent-radio` binary works without them. In a
+source checkout, the same helper file lives at `shell/agent-radio.sh`.
 
 ## Development
 
@@ -372,12 +431,16 @@ VERSION=v0.1.0 scripts/build-release.sh
 Artifacts are written to `dist/`.
 
 The release script uses Go cross-compilation to build Linux and macOS binaries
-from one machine. GitHub Actions should run the same build for tagged releases
-and upload the `dist/` files as release assets.
+from one machine, injects `VERSION` into `agent-radio version` and MCP
+metadata, copies `shell/agent-radio.sh` as `agent-radio-shell-helpers.sh`, and
+writes `checksums.txt`.
 
-Tagged releases use `.github/workflows/ci.yml`. Pushing a tag like `v0.1.0`
-runs tests, cross-compiles Linux/macOS `amd64` and `arm64` binaries, and uploads
-the stable asset names used by `install.sh`.
+Releases are tag-driven. Merging a PR into `master` runs
+`.github/workflows/auto-release-tag.yml`, which tests `master`, creates the next
+`vMAJOR.MINOR.PATCH` tag, cross-compiles Linux/macOS `amd64` and `arm64`
+binaries, generates checksums, attests artifacts, and uploads the stable asset
+names used by `install.sh`. Manual `v*` tag pushes are still supported by
+`.github/workflows/ci.yml`.
 
 ## Roadmap
 

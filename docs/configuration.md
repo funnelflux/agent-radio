@@ -22,6 +22,10 @@ folders, choose the session command, and append a workspace to the YAML.
 When run non-interactively or with flags such as `--agent`, `--no-mcp`, or
 `--force`, `setup` keeps the script-friendly starter behavior.
 
+Config is trusted local input. Session `command` values are run through the
+user's shell when Agent Radio starts sessions, so do not use config files from
+untrusted sources.
+
 ## Minimal Config
 
 ```yaml

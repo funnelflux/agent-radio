@@ -21,6 +21,7 @@ import (
 	"github.com/funnelflux/agent-radio/internal/panel"
 	"github.com/funnelflux/agent-radio/internal/store"
 	"github.com/funnelflux/agent-radio/internal/tmuxradio"
+	"github.com/funnelflux/agent-radio/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,6 +34,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx := context.Background()
 	switch args[0] {
+	case "--version", "version":
+		_, err := fmt.Fprintf(stdout, "agent-radio %s\n", version.Version)
+		return err
 	case "setup":
 		return setup(ctx, stdout, args[1:])
 	case "up":
@@ -86,6 +90,7 @@ Commands:
   sessions
   doctor
   panel
+  version
   mcp
   mcp install [--codex] [--claude] [--opencode] [--all]`)
 }
@@ -1229,6 +1234,15 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 	}
 	defer st.Close()
 	last, _ := st.MaxID(ctx)
+	if *route {
+		if pending, err := st.PendingRoutes(ctx, *all, agent); err == nil {
+			for _, msg := range pending {
+				fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
+				routeMessage(ctx, msg)
+				_ = st.MarkRouted(ctx, msg.To, msg)
+			}
+		}
+	}
 	for {
 		msgs, err := st.Since(ctx, last, *all, agent)
 		if err != nil {
@@ -1239,6 +1253,7 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 			fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
 			if *route {
 				routeMessage(ctx, msg)
+				_ = st.MarkRouted(ctx, msg.To, msg)
 			}
 		}
 		time.Sleep(2 * time.Second)

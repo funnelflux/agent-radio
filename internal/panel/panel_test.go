@@ -3,6 +3,7 @@ package panel
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -28,6 +29,53 @@ func TestSelectedSessionRowKeepsActivityColumn(t *testing.T) {
 	padded := padPlain(line, 54)
 	if !strings.Contains(padded, "alive") || !strings.Contains(padded, "idle") {
 		t.Fatalf("selected session columns were cropped: %q", padded)
+	}
+}
+
+func TestClassifyActivityFromPaneTitle(t *testing.T) {
+	now := time.Unix(100, 0)
+	tests := []struct {
+		name string
+		in   sessionState
+		want string
+	}{
+		{
+			name: "stopped",
+			in:   sessionState{},
+			want: "idle",
+		},
+		{
+			name: "spinner title",
+			in:   sessionState{alive: true, paneTitle: "⠋ flux-saas-runtime", lastActivity: now.Add(-time.Minute)},
+			want: "work",
+		},
+		{
+			name: "approval text",
+			in:   sessionState{alive: true, paneTitle: "codex", snapshot: "Allow command? approve / deny"},
+			want: "input",
+		},
+		{
+			name: "codex idle title",
+			in:   sessionState{alive: true, paneTitle: "flux-saas-runtime", paneCommand: "bash", lastActivity: now.Add(-time.Minute)},
+			want: "wait",
+		},
+		{
+			name: "opencode generic title",
+			in:   sessionState{alive: true, paneTitle: "OpenCode", paneCommand: "bash", lastActivity: now.Add(-time.Minute)},
+			want: "idle",
+		},
+		{
+			name: "recent tmux activity",
+			in:   sessionState{alive: true, paneTitle: "bash", paneCommand: "bash", lastActivity: now.Add(-5 * time.Second)},
+			want: "work",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyActivity(tt.in, now); got != tt.want {
+				t.Fatalf("classifyActivity() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
