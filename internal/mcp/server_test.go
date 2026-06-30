@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/funnelflux/agent-radio/internal/version"
 )
 
 func TestServeInitializeListAndMessageFlow(t *testing.T) {
@@ -71,7 +73,9 @@ workspaces:
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agent_radio_list_agents","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agent_radio_list_agents","arguments":{"scope":"all"}}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agent_radio_send","arguments":{"to":"codex-b","kind":"ASK","body":"proof"}}}`,
-		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"agent_radio_inbox","arguments":{"agent":"codex-b","peek":true}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"agent_radio_send","arguments":{"to":"codex-other","kind":"ASK","body":"leak"}}}`,
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"agent_radio_session_status","arguments":{"name":"codex-b"}}}`,
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agent_radio_session_status","arguments":{"name":"codex-other"}}}`,
 		"",
 	}, "\n")
 
@@ -81,11 +85,14 @@ workspaces:
 	}
 
 	responses := readResponses(t, out.String())
-	if len(responses) != 9 {
-		t.Fatalf("response count = %d, want 9; output:\n%s", len(responses), out.String())
+	if len(responses) != 11 {
+		t.Fatalf("response count = %d, want 11; output:\n%s", len(responses), out.String())
 	}
 	if responses[0]["error"] != nil {
 		t.Fatalf("initialize error: %#v", responses[0]["error"])
+	}
+	if got := nested(t, responses[0], "result", "serverInfo", "version"); got != version.Version {
+		t.Fatalf("initialize serverInfo version = %v, want %q", got, version.Version)
 	}
 	tools := nested(t, responses[1], "result", "tools")
 	if tools == nil {
@@ -109,11 +116,75 @@ workspaces:
 	if strings.Contains(toolText(t, responses[5]), `"name": "codex-other"`) {
 		t.Fatalf("default agent list leaked unrelated session: %s", toolText(t, responses[5]))
 	}
-	if !strings.Contains(toolText(t, responses[6]), `"name": "codex-other"`) {
-		t.Fatalf("scope all agent list missing unrelated session: %s", toolText(t, responses[6]))
+	if nested(t, responses[6], "result", "isError") != true {
+		t.Fatalf("scope all should be rejected: %#v", responses[6])
 	}
-	if !strings.Contains(toolText(t, responses[8]), `"body": "proof"`) {
-		t.Fatalf("inbox result missing message: %s", toolText(t, responses[8]))
+	if !strings.Contains(toolText(t, responses[7]), `"body": "proof"`) {
+		t.Fatalf("send result missing message: %s", toolText(t, responses[7]))
+	}
+	if nested(t, responses[8], "result", "isError") != true {
+		t.Fatalf("cross-workspace send should be rejected: %#v", responses[8])
+	}
+	if !strings.Contains(toolText(t, responses[9]), `"name": "codex-b"`) {
+		t.Fatalf("same-workspace session status missing session: %s", toolText(t, responses[9]))
+	}
+	if nested(t, responses[10], "result", "isError") != true {
+		t.Fatalf("cross-workspace session status should be rejected: %#v", responses[10])
+	}
+}
+
+func TestServeInboxIsBoundToCurrentAgent(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+workspaces:
+  - name: Agent Radio
+    root: /tmp
+    sessions:
+      - name: codex-a
+        type: codex
+        path: /tmp
+        command: codex
+      - name: codex-b
+        type: codex
+        path: /tmp
+        command: codex
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT_RADIO_CONFIG", configPath)
+	t.Setenv("AGENT_RADIO_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("AGENT_RADIO_ID", "codex-a")
+
+	var out bytes.Buffer
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agent_radio_send","arguments":{"to":"codex-b","kind":"ASK","body":"proof"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agent_radio_inbox","arguments":{"peek":true}}}`,
+		"",
+	}, "\n")
+	if err := Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	responses := readResponses(t, out.String())
+	if nested(t, responses[1], "result", "isError") == true {
+		t.Fatalf("own inbox should not reject supported args: %#v", responses[1])
+	}
+	if strings.Contains(toolText(t, responses[1]), `"body": "proof"`) {
+		t.Fatalf("sender inbox should not expose recipient message: %s", toolText(t, responses[1]))
+	}
+
+	t.Setenv("AGENT_RADIO_ID", "codex-b")
+	out.Reset()
+	input = strings.Join([]string{
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agent_radio_inbox","arguments":{"peek":true}}}`,
+		"",
+	}, "\n")
+	if err := Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	responses = readResponses(t, out.String())
+	if !strings.Contains(toolText(t, responses[0]), `"body": "proof"`) {
+		t.Fatalf("own inbox missing message: %s", toolText(t, responses[0]))
 	}
 }
 
@@ -132,6 +203,15 @@ func readResponses(t *testing.T, output string) []map[string]any {
 		t.Fatal(err)
 	}
 	return responses
+}
+
+func toJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func nested(t *testing.T, msg map[string]any, keys ...string) any {

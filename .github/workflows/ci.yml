@@ -35,10 +35,13 @@ jobs:
 
   release-artifacts:
     name: Build Release Artifacts
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: test
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +50,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Build release artifacts
         run: VERSION="${GITHUB_REF_NAME:-dev}" scripts/build-release.sh
@@ -61,6 +64,18 @@ jobs:
             dist/agent-radio-linux-arm64
             dist/agent-radio-darwin-amd64
             dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
+            dist/checksums.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: |
+            dist/agent-radio-linux-amd64
+            dist/agent-radio-linux-arm64
+            dist/agent-radio-darwin-amd64
+            dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
             dist/checksums.txt
 
       - name: Publish GitHub release
@@ -72,4 +87,5 @@ jobs:
             dist/agent-radio-linux-arm64
             dist/agent-radio-darwin-amd64
             dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
             dist/checksums.txt

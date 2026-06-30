@@ -1,0 +1,192 @@
+name: Auto Release Tag
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+
+concurrency:
+  group: auto-release-tag-master
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  test:
+    name: Test merged master
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build current platform
+        run: go build -o ./bin/agent-radio ./cmd/agent-radio
+
+  tag-release:
+    name: Tag merged master PR
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      created: ${{ steps.tag.outputs.created }}
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Choose version bump
+        id: bump
+        env:
+          EVENT_PATH: ${{ github.event_path }}
+        run: |
+          set -euo pipefail
+
+          labels="$(jq -r '.pull_request.labels[].name // empty' "$EVENT_PATH" | tr '[:upper:]' '[:lower:]')"
+          title="$(jq -r '.pull_request.title // ""' "$EVENT_PATH")"
+          body="$(jq -r '.pull_request.body // ""' "$EVENT_PATH")"
+
+          if printf '%s\n' "$labels" | grep -qx 'release:none'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          bump="patch"
+          if printf '%s\n' "$labels" | grep -Eqx 'release:major|semver:major'; then
+            bump="major"
+          elif printf '%s\n' "$labels" | grep -Eqx 'release:minor|semver:minor'; then
+            bump="minor"
+          elif printf '%s\n' "$labels" | grep -Eqx 'release:patch|semver:patch'; then
+            bump="patch"
+          elif printf '%s\n' "$title" | grep -Eiq '^[[:alnum:]_-]+(\([^)]+\))?!:'; then
+            bump="major"
+          elif printf '%s\n' "$body" | grep -Eiq '^BREAKING[ -]CHANGE:'; then
+            bump="major"
+          elif printf '%s\n' "$title" | grep -Eiq '^feat(\(.+\))?:'; then
+            bump="minor"
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push release tag
+        id: tag
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+          SKIP: ${{ steps.bump.outputs.skip }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SKIP" = "true" ]; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "Release tag skipped by release:none label."
+            exit 0
+          fi
+
+          git fetch --force --tags origin
+
+          existing_tag="$(git tag --points-at "$MERGE_SHA" --list 'v[0-9]*.[0-9]*.[0-9]*' | head -n 1)"
+          if [ -n "$existing_tag" ]; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$existing_tag" >> "$GITHUB_OUTPUT"
+            echo "Merge commit already has release tag $existing_tag; reusing it."
+            exit 0
+          fi
+
+          latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          next_tag="$(scripts/next-version.sh "$latest_tag" "$BUMP")"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$next_tag" "$MERGE_SHA" -m "Release $next_tag"
+          git push origin "$next_tag"
+
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$next_tag" >> "$GITHUB_OUTPUT"
+          echo "Created release tag $next_tag from $MERGE_SHA using $BUMP bump."
+
+  release-artifacts:
+    name: Build and publish release
+    if: needs.tag-release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    needs: tag-release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.tag-release.outputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build release artifacts
+        run: VERSION="${{ needs.tag-release.outputs.tag }}" scripts/build-release.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-radio-release-artifacts-${{ needs.tag-release.outputs.tag }}
+          path: |
+            dist/agent-radio-linux-amd64
+            dist/agent-radio-linux-arm64
+            dist/agent-radio-darwin-amd64
+            dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
+            dist/checksums.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: |
+            dist/agent-radio-linux-amd64
+            dist/agent-radio-linux-arm64
+            dist/agent-radio-darwin-amd64
+            dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
+            dist/checksums.txt
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ needs.tag-release.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/agent-radio-linux-amd64
+            dist/agent-radio-linux-arm64
+            dist/agent-radio-darwin-amd64
+            dist/agent-radio-darwin-arm64
+            dist/agent-radio-shell-helpers.sh
+            dist/checksums.txt
