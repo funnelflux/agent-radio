@@ -50,7 +50,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Build release artifacts
         run: VERSION="${GITHUB_REF_NAME:-dev}" scripts/build-release.sh
@@ -68,7 +68,7 @@ jobs:
             dist/checksums.txt
 
       - name: Attest release artifacts
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: |
             dist/agent-radio-linux-amd64

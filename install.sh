@@ -140,35 +140,53 @@ EOF
   fi
 }
 
-mkdir -p "$install_dir" "$helper_dir"
+mkdir -p "$install_dir"
 confirm_overwrite "$install_dir/agent-radio"
-confirm_overwrite "$helper_dir/agent-radio.sh"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 binary="$tmp_dir/$asset"
 helper="$tmp_dir/$helper_asset"
 checksums="$tmp_dir/checksums.txt"
+helper_available=1
 
 echo "Installing agent-radio $version_label for $os/$arch"
 echo "Downloading release asset and checksums..."
 curl -fsSL "$url" -o "$binary"
-curl -fsSL "$helper_url" -o "$helper"
 curl -fsSL "$checksums_url" -o "$checksums"
+if ! curl -fsSL "$helper_url" -o "$helper"; then
+  if [ "$version" = "latest" ]; then
+    echo "failed to download required shell helper asset: $helper_url" >&2
+    exit 1
+  fi
+  helper_available=0
+  echo "Shell helper asset is not available for $version_label; skipping helper install." >&2
+fi
 
 verify_checksum "$binary" "$asset"
-verify_checksum "$helper" "$helper_asset"
+if [ "$helper_available" = "1" ]; then
+  verify_checksum "$helper" "$helper_asset"
+  mkdir -p "$helper_dir"
+  confirm_overwrite "$helper_dir/agent-radio.sh"
+fi
 
 chmod +x "$binary"
 mv "$binary" "$install_dir/agent-radio"
-mv "$helper" "$helper_dir/agent-radio.sh"
-chmod 0644 "$helper_dir/agent-radio.sh"
+if [ "$helper_available" = "1" ]; then
+  mv "$helper" "$helper_dir/agent-radio.sh"
+  chmod 0644 "$helper_dir/agent-radio.sh"
+fi
 
 cat <<EOF
 Installed:
   $install_dir/agent-radio
+EOF
+
+if [ "$helper_available" = "1" ]; then
+  cat <<EOF
   $helper_dir/agent-radio.sh
 EOF
+fi
 
 if ! command -v agent-radio >/dev/null 2>&1; then
   cat <<EOF
@@ -184,12 +202,16 @@ Then run:
 EOF
 fi
 
-cat <<EOF
+if [ "$helper_available" = "1" ]; then
+  cat <<EOF
 
 Optional shell helpers:
 
   source "$helper_dir/agent-radio.sh"
+EOF
+fi
 
+cat <<EOF
 Next steps:
 
   cd /path/to/project
