@@ -290,22 +290,26 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case "enter":
 		if m.tab == tabWorkspaces {
-			if m.isMobile() && m.focus == 0 {
+			if m.focus == 0 {
 				m.focus = 1
 				return m, nil
 			}
 			return m, m.openSelectedCmd()
 		}
 	case "s":
-		return m, m.startSelectedCmd()
+		if m.tab == tabWorkspaces && m.focus == 1 {
+			return m, m.startSelectedCmd()
+		}
 	case "S":
 		return m, m.startWorkspaceCmd()
 	case "r":
 		m.status = "refreshing"
 		return m, m.refreshCmd()
 	case "k":
-		m.confirm = "kill-session"
-		m.status = "kill selected session? y/n"
+		if m.tab == tabWorkspaces && m.focus == 1 {
+			m.confirm = "kill-session"
+			m.status = "kill selected session? y/n"
+		}
 	case "K":
 		m.confirm = "kill-workspace"
 		m.status = "kill all workspace sessions? y/n"
@@ -684,6 +688,9 @@ func (m *model) navBar() string {
 	if m.confirm != "" {
 		return crop(strings.Join(parts, " ")+"  "+warnStyle.Render(m.status)+"  "+mutedStyle.Render("y confirm  n cancel"), m.width)
 	}
+	if statusIsError(m.status) {
+		return crop(strings.Join(parts, " ")+"  "+warnStyle.Render(m.status), m.width)
+	}
 	return crop(strings.Join(parts, " "), m.width)
 }
 
@@ -756,7 +763,7 @@ func (m *model) sessionList(width, height, x, y int) string {
 			padPlain(count, countW),
 			activityIndicator(s, m.frame, activityW),
 		)
-		if i == m.sessionCursor {
+		if m.tab == tabWorkspaces && m.focus == 1 && i == m.sessionCursor {
 			line = selectedRow(fmt.Sprintf("%s %s %s %s %s", name, padPlain(kind, typeW), padPlain(status, statusW), padPlain(count, countW), activityPlain(s, m.frame, activityW)), width-4)
 		}
 		lines = append(lines, line)
@@ -851,7 +858,7 @@ func (m *model) footer() string {
 	}
 	if m.confirm != "" {
 		help = warnStyle.Render(m.status) + "  y confirm  n cancel"
-	} else if m.status != "" {
+	} else if m.status != "" && !statusIsError(m.status) {
 		help = mutedStyle.Render(m.status) + "  " + help
 	}
 	return crop(help, m.width)
@@ -926,6 +933,10 @@ func (m *model) contentY() int {
 
 func (m *model) statusLine() string {
 	return strings.Join([]string{badge("router", m.router), badge("tmux", m.tmuxOK), goodStyle.Render("db " + m.dbStatus)}, "  ")
+}
+
+func statusIsError(status string) bool {
+	return strings.HasPrefix(status, "error:") || strings.HasPrefix(status, "refresh error:")
 }
 
 func (m *model) routerWarningHeight() int {
