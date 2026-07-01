@@ -184,7 +184,7 @@ func Wake(ctx context.Context, session, text string) error {
 }
 
 func IsInfra(name string) bool {
-	return strings.HasPrefix(name, "agent-radio-") || strings.HasPrefix(name, "ff-")
+	return strings.HasPrefix(name, "agent-radio-")
 }
 
 func shellQuote(s string) string {

@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/funnelflux/agent-radio/internal/config"
+	"github.com/funnelflux/agent-radio/internal/store"
 )
 
 func withEnv(t *testing.T, key, val string) {
@@ -63,6 +66,7 @@ func TestSetupCreatesStarterConfig(t *testing.T) {
 			t.Fatalf("setup output/config missing %q\nconfig:\n%s\nout:\n%s", want, got, out.String())
 		}
 	}
+	assertMode(t, configPath, 0o600)
 }
 
 func TestSetupDoesNotOverwriteExistingConfig(t *testing.T) {
@@ -129,6 +133,7 @@ func TestMCPInstallWritesClientConfigs(t *testing.T) {
 				t.Fatalf("%s missing %q:\n%s", path, want, got)
 			}
 		}
+		assertMode(t, path, 0o600)
 	}
 	if !strings.Contains(out.String(), "Codex: installed") || !strings.Contains(out.String(), "OpenCode: installed") {
 		t.Fatalf("unexpected install output: %s", out.String())
@@ -178,6 +183,15 @@ func TestMCPInstallRepairsStaleConfigs(t *testing.T) {
 		if !strings.Contains(got, bin) {
 			t.Fatalf("%s missing repaired command %q:\n%s", path, bin, got)
 		}
+		assertMode(t, path, 0o600)
+		backups, err := filepath.Glob(path + ".bak.*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(backups) != 1 {
+			t.Fatalf("%s backup count = %d, want 1", path, len(backups))
+		}
+		assertMode(t, backups[0], 0o600)
 	}
 	codex, err := os.ReadFile(codexPath)
 	if err != nil {
@@ -185,6 +199,17 @@ func TestMCPInstallRepairsStaleConfigs(t *testing.T) {
 	}
 	if !strings.Contains(string(codex), "[mcp_servers.other]") {
 		t.Fatalf("codex repair removed following sections:\n%s", string(codex))
+	}
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %o, want %o", path, got, want)
 	}
 }
 
@@ -225,6 +250,32 @@ func TestCLIFlowSendInboxDone(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "DONE from codex-b") {
 		t.Fatalf("sender did not receive done: %s", out.String())
+	}
+}
+
+func TestRouteTargetsOnlyConfiguredSessions(t *testing.T) {
+	cfg := config.Config{Workspaces: []config.Workspace{{
+		Name: "Test",
+		Sessions: []config.Session{
+			{Name: "tmux-a", AgentID: "agent-a"},
+			{Name: "tmux-b", AgentID: "agent-b"},
+			{Name: "agent-radio-router", AgentID: "router"},
+		},
+	}}}
+
+	direct := routeTargets(cfg, store.Message{From: "agent-a", To: "agent-b"})
+	if len(direct) != 1 || direct[0] != "tmux-b" {
+		t.Fatalf("direct targets = %#v, want tmux-b", direct)
+	}
+
+	broadcast := routeTargets(cfg, store.Message{From: "agent-a", To: "all"})
+	if len(broadcast) != 1 || broadcast[0] != "tmux-b" {
+		t.Fatalf("broadcast targets = %#v, want only tmux-b", broadcast)
+	}
+
+	unknown := routeTargets(cfg, store.Message{From: "agent-a", To: "stray-tmux-session"})
+	if len(unknown) != 0 {
+		t.Fatalf("unknown targets = %#v, want none", unknown)
 	}
 }
 
