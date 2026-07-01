@@ -147,6 +147,25 @@ func Kill(ctx context.Context, name string) error {
 	return exec.CommandContext(ctx, "tmux", "kill-session", "-t", name).Run()
 }
 
+func CurrentSession(ctx context.Context) (string, error) {
+	target := strings.TrimSpace(os.Getenv("TMUX_PANE"))
+	if target == "" {
+		if strings.TrimSpace(os.Getenv("TMUX")) == "" {
+			return "", fmt.Errorf("not inside tmux")
+		}
+		target = "."
+	}
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#S").Output()
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		return "", fmt.Errorf("empty tmux session")
+	}
+	return name, nil
+}
+
 func Capture(ctx context.Context, name string, lines int) (string, error) {
 	if lines <= 0 {
 		lines = 40
@@ -171,8 +190,13 @@ func Wake(ctx context.Context, session, text string) error {
 	if err := clear.Run(); err != nil {
 		return err
 	}
-	typeCmd := exec.CommandContext(ctx, "tmux", "send-keys", "-t", session, "-l", text)
-	if err := typeCmd.Run(); err != nil {
+	buffer := fmt.Sprintf("agent-radio-wake-%d", time.Now().UnixNano())
+	set := exec.CommandContext(ctx, "tmux", "set-buffer", "-b", buffer, text)
+	if err := set.Run(); err != nil {
+		return err
+	}
+	paste := exec.CommandContext(ctx, "tmux", "paste-buffer", "-d", "-b", buffer, "-t", session)
+	if err := paste.Run(); err != nil {
 		return err
 	}
 	select {
