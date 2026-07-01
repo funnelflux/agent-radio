@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -29,6 +30,40 @@ func TestSelectedSessionRowKeepsActivityColumn(t *testing.T) {
 	padded := padPlain(line, 54)
 	if !strings.Contains(padded, "alive") || !strings.Contains(padded, "idle") {
 		t.Fatalf("selected session columns were cropped: %q", padded)
+	}
+}
+
+func TestPanelErrorStatusRendersInNavNotFooter(t *testing.T) {
+	m := &model{width: 120, status: `error: session "codex-api-docs-zudoku" is not running`}
+
+	if got := m.navBar(); !strings.Contains(got, m.status) {
+		t.Fatalf("navBar missing error status: %q", got)
+	}
+	if got := m.footer(); strings.Contains(got, m.status) {
+		t.Fatalf("footer should not render error status: %q", got)
+	}
+}
+
+func TestWorkspaceFocusDoesNotActOnSession(t *testing.T) {
+	m := &model{width: 120, tab: tabWorkspaces, focus: 0}
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("enter on workspace focus should not open a session")
+	}
+	if m.focus != 1 {
+		t.Fatalf("enter should move focus to sessions, got %d", m.focus)
+	}
+
+	m.focus = 0
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if cmd != nil {
+		t.Fatal("s on workspace focus should not start a session")
+	}
+
+	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.confirm != "" {
+		t.Fatalf("k on workspace focus should not arm session kill, got %q", m.confirm)
 	}
 }
 

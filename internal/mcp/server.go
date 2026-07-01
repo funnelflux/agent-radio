@@ -727,6 +727,9 @@ func identity() (string, error) {
 	if v := strings.TrimSpace(os.Getenv("AGENT_RADIO_ID")); v != "" {
 		return v, nil
 	}
+	if session, err := tmuxradio.CurrentSession(context.Background()); err == nil {
+		return session, nil
+	}
 	return "", errors.New("AGENT_RADIO_ID is required")
 }
 
