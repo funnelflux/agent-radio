@@ -139,10 +139,10 @@ func setup(ctx context.Context, out io.Writer, args []string) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(configPath, []byte(starterConfig(cwd, *agentCommand)), 0o644); err != nil {
+	if err := writePrivateFile(configPath, []byte(starterConfig(cwd, *agentCommand))); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Created starter config:\n  %s\n\n", configPath)
@@ -610,14 +610,14 @@ func appendWorkspaceConfig(path string, m setupWizardModel) error {
 		})
 	}
 	cfg.Workspaces = append(cfg.Workspaces, ws)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	b, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writePrivateFile(path, b)
 }
 
 func uniqueRepoID(cfg config.Config, ws config.Workspace, base string) string {
@@ -824,7 +824,7 @@ func printMCPResult(out io.Writer, name, path string, changed bool) {
 }
 
 func upsertTOMLSection(path, marker, block string) (bool, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return false, err
 	}
 	b, err := os.ReadFile(path)
@@ -841,7 +841,7 @@ func upsertTOMLSection(path, marker, block string) (bool, error) {
 			return false, err
 		}
 	}
-	return true, os.WriteFile(path, []byte(next+"\n"), 0o644)
+	return true, writePrivateFile(path, []byte(next+"\n"))
 }
 
 func replaceTOMLSection(current, marker, section string) string {
@@ -970,7 +970,7 @@ func readJSONObject(path string) (map[string]any, bool, error) {
 }
 
 func writeJSONObject(path string, root map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(root, "", "  ")
@@ -978,7 +978,7 @@ func writeJSONObject(path string, root map[string]any) error {
 		return err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	return writePrivateFile(path, b)
 }
 
 func jsonEqual(a, b any) bool {
@@ -999,7 +999,32 @@ func backupFile(path string) error {
 		return err
 	}
 	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().Format("20060102-150405"))
-	return os.WriteFile(backup, b, 0o644)
+	return writePrivateFile(backup, b)
+}
+
+func writePrivateFile(path string, b []byte) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		return err
+	}
+	return nil
 }
 
 func detectAgentCommand() string {
@@ -1238,8 +1263,9 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 		if pending, err := st.PendingRoutes(ctx, *all, agent); err == nil {
 			for _, msg := range pending {
 				fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
-				routeMessage(ctx, msg)
-				_ = st.MarkRouted(ctx, msg.To, msg)
+				if routeMessage(ctx, msg) == nil {
+					_ = st.MarkRouted(ctx, msg.To, msg)
+				}
 			}
 		}
 	}
@@ -1252,31 +1278,51 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 			last = msg.ID
 			fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
 			if *route {
-				routeMessage(ctx, msg)
-				_ = st.MarkRouted(ctx, msg.To, msg)
+				if routeMessage(ctx, msg) == nil {
+					_ = st.MarkRouted(ctx, msg.To, msg)
+				}
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
 }
 
-func routeMessage(ctx context.Context, msg store.Message) {
-	if msg.To == "all" {
-		sessions, err := tmuxradio.Sessions(ctx)
-		if err != nil {
-			return
+func routeMessage(ctx context.Context, msg store.Message) error {
+	cfg, _, err := config.LoadDefault()
+	if err != nil {
+		return err
+	}
+	for _, target := range routeTargets(cfg, msg) {
+		if err := tmuxradio.Wake(ctx, target, nudge); err != nil {
+			return err
 		}
-		for _, s := range sessions {
-			if s.Name == msg.From || tmuxradio.IsInfra(s.Name) {
+	}
+	return nil
+}
+
+func routeTargets(cfg config.Config, msg store.Message) []string {
+	targets := []string{}
+	seen := map[string]struct{}{}
+	for _, ws := range cfg.Workspaces {
+		for _, session := range ws.Sessions {
+			agentID := session.AgentID
+			if strings.TrimSpace(agentID) == "" {
+				agentID = session.Name
+			}
+			if session.Name == msg.From || agentID == msg.From || tmuxradio.IsInfra(session.Name) {
 				continue
 			}
-			_ = tmuxradio.Wake(ctx, s.Name, nudge)
+			if msg.To != "all" && msg.To != session.Name && msg.To != agentID {
+				continue
+			}
+			if _, ok := seen[session.Name]; ok {
+				continue
+			}
+			seen[session.Name] = struct{}{}
+			targets = append(targets, session.Name)
 		}
-		return
 	}
-	if msg.To != msg.From && !tmuxradio.IsInfra(msg.To) {
-		_ = tmuxradio.Wake(ctx, msg.To, nudge)
-	}
+	return targets
 }
 
 func up(ctx context.Context, out io.Writer) error {

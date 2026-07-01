@@ -4,7 +4,9 @@ Agent Radio is a local control room and message bus for tmux-managed AI agents.
 It gives Codex, Claude Code, OpenCode, and other terminal agents a shared local
 directory, inbox, launcher, and panel without requiring a remote service.
 
-Even if you use software that manages multiple terminals in a dedicated UI (e.g. Conductor, T3 Code, Superset etc.), you can still use Agent Radio as a means for cross-repository, cross-agent communication and coordination.
+Even if you use software that already helps manage multiple terminals in a
+dedicated UI, Agent Radio can still provide cross-repository, cross-agent
+communication and coordination.
 
 ![Agent Radio panel](assets/screenshot.png)
 
@@ -25,6 +27,14 @@ Agent Radio provides:
 
 Agent Radio is local-first. It does not require a hosted account, network sync,
 or a background daemon outside tmux.
+
+This was inspired by inter-agent radio workflows, but keeps the implementation
+lightweight and focused on local communication. Agent Radio enables persistent
+agents, with any CLI, harness, or LLM, to work together and auto-discover each
+other.
+
+For example, you can have a Claude UI agent, a Codex backend agent, and an
+OpenCode agent in an API docs repository coordinate while executing a task.
 
 ## Requirements
 

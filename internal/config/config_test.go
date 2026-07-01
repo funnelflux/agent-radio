@@ -19,7 +19,7 @@ workspaces:
         name: Agent Radio
         path: /tmp
         role: coordination-tool
-        product: FunnelFlux
+        product: Example Product
         provides: [message-bus]
         capabilities: [go]
     sessions:

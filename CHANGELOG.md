@@ -9,14 +9,17 @@ This project follows a simple changelog format. Dates use `YYYY-MM-DD`.
 ### Added
 
 - Open-source governance, contribution, security, issue, and pull request documentation.
+- Security-oriented release hardening for generated local config files and router behavior.
 
 ### Changed
 
-- Nothing yet.
+- Generated Agent Radio and MCP client config files now use private file permissions.
+- Release-capable GitHub Actions are pinned to immutable action SHAs.
+- Router wakeups are scoped to configured Agent Radio sessions instead of arbitrary tmux sessions.
 
 ### Fixed
 
-- Nothing yet.
+- Removed avoidable private/company branding from public-facing metadata and test fixtures.
 
 ## Release notes
 

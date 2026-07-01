@@ -26,8 +26,6 @@ This is a solo-maintainer project. The maintainer makes final calls on enforceme
 
 ## Reporting
 
-Report conduct concerns privately to:
-
-- `zeno@funnelflux.com`
+Report conduct concerns privately through the maintainer's GitHub profile.
 
 If the concern is also a security issue, follow `SECURITY.md`.

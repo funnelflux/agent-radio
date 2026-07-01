@@ -28,7 +28,7 @@ workspaces:
         description: Local tmux message bus
         path: /tmp
         role: coordination-tool
-        product: FunnelFlux
+        product: Example Product
         provides: [agent-message-bus]
         capabilities: [tmux]
     sessions:

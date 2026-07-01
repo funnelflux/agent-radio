@@ -15,7 +15,6 @@ It is intended to be small, inspectable, and easy to install as a single binary.
 5. Use `rg` or `find` for discovery.
 6. Use `apply_patch` for manual file edits when working through an agent.
 
-
 ## Commit And PR Release Semantics
 
 AI agents that create commits, branches, or PRs must use Conventional Commit
