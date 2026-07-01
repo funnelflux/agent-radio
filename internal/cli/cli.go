@@ -1002,11 +1002,29 @@ func backupFile(path string) error {
 	return writePrivateFile(backup, b)
 }
 
-func writePrivateFile(path string, b []byte) error {
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+func writePrivateFile(path string, b []byte) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		return err
+	}
+	return nil
 }
 
 func detectAgentCommand() string {
@@ -1245,8 +1263,9 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 		if pending, err := st.PendingRoutes(ctx, *all, agent); err == nil {
 			for _, msg := range pending {
 				fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
-				routeMessage(ctx, msg)
-				_ = st.MarkRouted(ctx, msg.To, msg)
+				if routeMessage(ctx, msg) == nil {
+					_ = st.MarkRouted(ctx, msg.To, msg)
+				}
 			}
 		}
 	}
@@ -1259,22 +1278,26 @@ func watch(ctx context.Context, out io.Writer, args []string) error {
 			last = msg.ID
 			fmt.Fprintf(out, "#%d %s %s -> %s: %s\n", msg.ID, msg.Kind, msg.From, msg.To, msg.Body)
 			if *route {
-				routeMessage(ctx, msg)
-				_ = st.MarkRouted(ctx, msg.To, msg)
+				if routeMessage(ctx, msg) == nil {
+					_ = st.MarkRouted(ctx, msg.To, msg)
+				}
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
 }
 
-func routeMessage(ctx context.Context, msg store.Message) {
+func routeMessage(ctx context.Context, msg store.Message) error {
 	cfg, _, err := config.LoadDefault()
 	if err != nil {
-		return
+		return err
 	}
 	for _, target := range routeTargets(cfg, msg) {
-		_ = tmuxradio.Wake(ctx, target, nudge)
+		if err := tmuxradio.Wake(ctx, target, nudge); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func routeTargets(cfg config.Config, msg store.Message) []string {
