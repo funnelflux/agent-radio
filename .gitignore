@@ -1,0 +1,32 @@
+# Build outputs
+/bin/
+/dist/
+
+# Local runtime state
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local editor and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Local AI/editor runtime folders
+.agents/
+.ai/
+.claude/
+.codex/
+.serena/
+CLAUDE.md
+
+# Benchmark and scratch output
+/var/
+/tmp/
