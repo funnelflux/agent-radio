@@ -28,10 +28,10 @@ Agent Radio provides:
 Agent Radio is local-first. It does not require a hosted account, network sync,
 or a background daemon outside tmux.
 
-This was inspired by inter-agent radio workflows, but keeps the implementation
-lightweight and focused on local communication. Agent Radio enables persistent
-agents, with any CLI, harness, or LLM, to work together and auto-discover each
-other.
+Agent Radio was loosely inspired by the agent radio feature in
+[H5i](https://github.com/h5i-dev/h5i), but keeps the implementation lightweight
+and focused on local communication. It enables persistent agents, with any CLI,
+harness, or LLM, to work together and auto-discover each other.
 
 For example, you can have a Claude UI agent, a Codex backend agent, and an
 OpenCode agent in an API docs repository coordinate while executing a task.
